@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>PyScript Minecraft Username Finder</title>
+  <!-- PyScript -->
+  <link rel="stylesheet" href="https://pyscript.net/latest/pyscript.css" />
+  <script defer src="https://pyscript.net/latest/pyscript.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding:1em; display:flex; height:100vh; margin:0 }
+    #controls { margin-bottom:1em }
+    label { margin-right:1em }
+    input { width:6ch; margin-left:.25em }
+    button { margin-left:.5em }
+    #log, #avail {
+      flex:1;
+      margin:0.5em;
+      padding:1em;
+      border:1px solid #ccc;
+      overflow-y:auto;
+      white-space:pre-wrap;
+      background:#f9f9f9;
+    }
+    #container { display:flex; flex:1 }
+  </style>
+</head>
+<body>
+
+  <div style="flex:1; display:flex; flex-direction:column">
+    <div id="controls">
+      <label>Find:</label><input id="count" type="number" value="50" min="1"/>
+      <label>Delay(ms):</label><input id="delay" type="number" value="0" min="0"/>
+      <label>Workers:</label><input id="workers" type="number" value="50" min="1" max="200"/>
+      <button id="startBtn">Start</button>
+    </div>
+    <div id="log">Log output...</div>
+  </div>
+
+  <div style="flex:1; display:flex; flex-direction:column">
+    <h3>Available Usernames</h3>
+    <div id="avail"></div>
+  </div>
+
+  <py-script>
+import asyncio
+import aiohttp
+from js import document, console
+
+# DOM elements
+log_div   = document.getElementById("log")
+avail_div = document.getElementById("avail")
+start_btn = document.getElementById("startBtn")
+
+# Utility to append text
+def js_log(txt, to_avail=False):
+    if to_avail:
+        node = document.createElement("div")
+        node.innerText = txt
+        avail_div.appendChild(node)
+    else:
+        log_div.innerText += txt + "\n"
+        log_div.scrollTop = log_div.scrollHeight
+
+# Generate 4-letter name from index
+ALPHA = "abcdefghijklmnopqrstuvwxyz"
+def name_from_idx(i):
+    d3 = (i // 26**3) % 26
+    d2 = (i // 26**2) % 26
+    d1 = (i // 26)    % 26
+    d0 = i % 26
+    return ALPHA[d3]+ALPHA[d2]+ALPHA[d1]+ALPHA[d0]
+
+async def worker(session, total, target, delay, counter):
+    found = 0
+    while (result := counter.get_next()) < total and counter.found < target:
+        uname = name_from_idx(result)
+        try:
+            async with session.get(f"https://api.mojang.com/users/profiles/minecraft/{uname}") as resp:
+                if resp.status in (404, 204):
+                    counter.found += 1
+                    js_log(f"[✅ {counter.found}/{target}] {uname}", to_avail=True)
+                counter.tried += 1
+                if counter.tried % 1000 == 0:
+                    js_log(f"…tried {counter.tried} names so far")
+        except Exception as e:
+            console.warn("Fetch error:", e)
+        if delay:
+            await asyncio.sleep(delay/1000)
+
+class Counter:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.idx = 0
+        self.tried = 0
+        self.found = 0
+    async def get_next(self):
+        async with self.lock:
+            i = self.idx
+            self.idx += 1
+            return i
+
+async def main_py(e):
+    # read controls
+    target  = int(document.getElementById("count").value)
+    delay   = int(document.getElementById("delay").value)
+    workers = int(document.getElementById("workers").value)
+    total   = 26**4
+
+    # reset UI
+    log_div.innerText   = ""
+    avail_div.innerText = ""
+
+    counter = Counter()
+    async with aiohttp.ClientSession() as sess:
+        tasks = [
+            worker(sess, total, target, delay, counter)
+            for _ in range(workers)
+        ]
+        await asyncio.gather(*tasks)
+
+# Wire start button
+start_btn.addEventListener("click", lambda e: asyncio.ensure_future(main_py(e)))
+  </py-script>
+
+</body>
+</html>
