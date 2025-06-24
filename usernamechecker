@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Blazing-Fast 4-Letter Finder (Fixed)</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding:1em; display:flex; height:100vh; box-sizing:border-box }
+    .pane { padding:1em; box-sizing:border-box }
+    #left { flex:2; display:flex; flex-direction:column }
+    #controls { margin-bottom:1em }
+    label { margin-right:1em }
+    #log { flex:1; background:#f4f4f4; border:1px solid #ddd; padding:1em; overflow-y:auto; font-size:.85em; white-space:pre-wrap }
+    #right { flex:1; border-left:2px solid #ccc; overflow-y:auto }
+    #available-list { list-style:none; padding:0 }
+    #available-list li { padding:.25em 0; border-bottom:1px solid #eee }
+    h2 { margin-top:0 }
+  </style>
+</head>
+<body>
+  <div id="left" class="pane">
+    <div id="controls">
+      <label>Find:</label>
+      <input type="number" id="count" value="50" min="1" style="width:5ch"/>
+      <label>Delay(ms):</label>
+      <input type="number" id="delay" value="0" min="0" style="width:5ch"/>
+      <label>Threads:</label>
+      <input type="number" id="threads" value="100" min="1" max="500" style="width:5ch"/>
+      <button id="startBtn">Start</button>
+    </div>
+    <div id="log">Waiting to start…</div>
+  </div>
+  <div id="right" class="pane">
+    <h2>Available Usernames</h2>
+    <ul id="available-list"></ul>
+  </div>
+
+  <script>
+  const TOTAL = 26**4;
+  const ALPHA = 'abcdefghijklmnopqrstuvwxyz';
+  let globalIdx = 0;
+
+  function nameFromIndex(i) {
+    // base-26 convert to 4 letters
+    const d3 = Math.floor(i / 26**3) % 26;
+    const d2 = Math.floor(i / 26**2) % 26;
+    const d1 = Math.floor(i / 26) % 26;
+    const d0 = i % 26;
+    return ALPHA[d3] + ALPHA[d2] + ALPHA[d1] + ALPHA[d0];
+  }
+
+  async function checkName(name) {
+    try {
+      const res = await fetch(
+        `https://api.mojang.com/users/profiles/minecraft/${name}`
+      );
+      return res.status === 404 || res.status === 204;
+    } catch {
+      return false;
+    }
+  }
+
+  const logEl = document.getElementById('log');
+  const availEl = document.getElementById('available-list');
+
+  function log(msg) {
+    logEl.textContent += msg + '\n';
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function addAvailable(name, found, target) {
+    const li = document.createElement('li');
+    li.textContent = `${found}/${target}: ${name}`;
+    availEl.appendChild(li);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', () => {
+    const target = +document.getElementById('count').value;
+    const delay = +document.getElementById('delay').value;
+    let threads = +document.getElementById('threads').value;
+    threads = Math.min(threads, 500);
+
+    logEl.textContent = '';
+    availEl.innerHTML = '';
+    globalIdx = 0;
+
+    let found = 0, tried = 0, running = true;
+
+    for (let t = 0; t < threads; t++) {
+      (async function worker() {
+        while (running) {
+          const idx = globalIdx++;
+          if (idx >= TOTAL) break;
+          const nm = nameFromIndex(idx);
+          const ok = await checkName(nm);
+          tried++;
+          if (ok) {
+            found++;
+            log(`[✔ AVAILABLE ${found}/${target}] ${nm}`);
+            addAvailable(nm, found, target);
+            if (found >= target) { running = false; }
+          } else if (tried % 2000 === 0) {
+            log(`…tried ${tried.toLocaleString()} names so far.`);
+          }
+          if (delay) await new Promise(r => setTimeout(r, delay));
+        }
+      })();
+    }
+  });
+  </script>
+</body>
+</html>
